@@ -67,8 +67,8 @@
   (struct-copy st b [player (posn+ (st-player b) dx 0)]))
 (define (handle-key b ke)
   (cond
-    [(key=? ke "left")  (move-player b (* -1 DELTA))]
-    [(key=? ke "right") (move-player b (* +1 DELTA))]
+    [(key=? ke "left")  (move-player b (* -3 DELTA))]
+    [(key=? ke "right") (move-player b (* +3 DELTA))]
     [(key=? ke " ")
      (define pbullets (st-pbullets b))
      (if ((length pbullets) . < . 3)
