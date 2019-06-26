@@ -10,24 +10,52 @@
 
 (define ACTOR-SIZE (* WIDTH BORDER 0.5))
 (define BULLET-SIZE (* ACTOR-SIZE 0.5))
-(define DELTA (* BULLET-SIZE 0.5))
+(define DELTA (* BULLET-SIZE 0.5 0.5))
+(define IDELTA (* DELTA 1/2))
 
+(define BACKGROUND
+  (empty-scene WIDTH HEIGHT "MidnightBlue"))
 (define PLAYER
-  (square ACTOR-SIZE "solid" "black"))
+  (let* ([thruster (triangle (* 0.50 ACTOR-SIZE) "solid" #;"orange" "MidnightBlue")]
+         [cockpit
+          (ellipse (* 0.50 ACTOR-SIZE) (* 0.75 ACTOR-SIZE) "solid" "DeepSkyBlue")]
+         [ship
+          (triangle (* 1.50 ACTOR-SIZE) "solid" "gray")]
+         [p (overlay cockpit ship)]
+         [p (overlay/align/offset  "left" "bottom" thruster (* -0.15 ACTOR-SIZE) 0 p)]
+         [p (overlay/align/offset "right" "bottom" thruster (* +0.15 ACTOR-SIZE) 0 p)])
+    p))
 (define PBULLET
-  (triangle BULLET-SIZE "solid" "black"))
+  (overlay/align "middle" "bottom"
+                 (ellipse (* 0.25 BULLET-SIZE) BULLET-SIZE "solid" "red")
+                 (triangle BULLET-SIZE "solid" "orange")))
 (define INVADER
-  (circle ACTOR-SIZE "solid" "red"))
+  (overlay/align
+   "middle" "bottom"
+   (ellipse (* 2.0 ACTOR-SIZE) (* 0.5 ACTOR-SIZE) "solid" "gray")
+   (overlay
+    (triangle (* 0.75 ACTOR-SIZE) "solid" "LightGray")
+    (circle (* 0.5 ACTOR-SIZE) "solid" "green"))))
 (define IBULLET
-  (star BULLET-SIZE "solid" "red"))
+  (ellipse (* 0.25 BULLET-SIZE) BULLET-SIZE "solid" "LimeGreen"))
+
+(define ROWS 5)
+(define COLS 9)
+(define (x->col x)
+  (round (sub1 (/ x (* WIDTH BORDER 2)))))
+(define (col->x col)
+  (* WIDTH BORDER 2 (add1 col)))
+(define (y->row x)
+  (round (sub1 (/ x (* HEIGHT BORDER 2)))))
+(define (row->y row)
+  (* HEIGHT BORDER 2 (add1 row)))
 
 (struct posn (x y))
 (struct st (player pbullets invaders ibullets))
 (define initial-invaders
-  (for*/list ([row (in-range 5)]
-              [col (in-range 9)])
-    (posn (* WIDTH BORDER 2 (add1 col))
-          (* HEIGHT BORDER 2 (add1 row)))))
+  (for*/list ([row (in-range ROWS)]
+              [col (in-range COLS)])
+    (posn (col->x col) (row->y row))))
 (define initial-st
   (st (posn (/ WIDTH 2) (* HEIGHT (- 1 BORDER))) '()
       initial-invaders '()))
@@ -42,10 +70,13 @@
     [(key=? ke "left")  (move-player b (* -1 DELTA))]
     [(key=? ke "right") (move-player b (* +1 DELTA))]
     [(key=? ke " ")
-     (struct-copy st b
-                  [pbullets
-                   (cons (posn+ (st-player b) 0 (* -1 ACTOR-SIZE))
-                         (st-pbullets b))])]
+     (define pbullets (st-pbullets b))
+     (if ((length pbullets) . < . 3)
+       (struct-copy st b
+                    [pbullets
+                     (cons (posn+ (st-player b) 0 (* -1 ACTOR-SIZE))
+                           pbullets)])
+       b)]
     [else b]))
 
 (define ((hit? p1) p2)
@@ -59,31 +90,38 @@
 (define (on-screen? p)
   (and (<= 0 (posn-x p) WIDTH)
        (<= 0 (posn-y p) HEIGHT)))
-;; XXX fix this
 (define (move-invader p)
-  (posn+ p
-         (* DELTA 0.5 (- (random) 0.5))
-         (* DELTA 0.2 (random))))
+  (define row (y->row (posn-y p)))
+  (define col (x->col (posn-x p)))
+  (cond
+    [(even? row)
+     (if (= col (sub1 COLS))
+       (posn (col->x col) (row->y (add1 row)))
+       (posn+ p (* +1 IDELTA) 0))]
+    [else
+     (if (= col 0)
+       (posn (col->x col) (row->y (add1 row)))
+       (posn+ p (* -1 IDELTA) 0))]))
 (define (maybe-shoot p)
   (cond
-    [(<= (random) 0.002)
+    [(<= (random) 0.01)
      (list (posn+ p 0 (* +1 ACTOR-SIZE)))]
     [else
      empty]))
 
-(define (remove1 ? l)
+(define (remove? ? l)
   (cond
     [(empty? l) (values #f l)]
     [(? (first l)) (values #t (rest l))]
     [else
-     (define-values (removed? remaining) (remove1 ? (rest l)))
+     (define-values (removed? remaining) (remove? ? (rest l)))
      (values removed? (cons (first l) remaining))]))
 (define (find-hit-pbullets pbs targets)
   (cond
     [(empty? pbs) (values empty targets)]
     [else
      (define-values (removed? remaining)
-       (remove1 (hit? (first pbs)) targets))
+       (remove? (hit? (first pbs)) targets))
      (define-values (rest-pbs rest-targets)
        (find-hit-pbullets (rest pbs) remaining))
      (if removed?
@@ -95,7 +133,6 @@
   (define moved-pbullets
     (filter on-screen? (map (move-bullet -2) (st-pbullets b))))
   (define moved-invaders
-    ;; XXX partition and re-show
     (filter on-screen? (map move-invader (st-invaders b))))
   (define-values (left-pbullets0 left-invaders)
     (find-hit-pbullets moved-pbullets moved-invaders))
@@ -119,16 +156,22 @@
 (define (draw-some sc img l)
   (for/fold ([sc sc]) ([e (in-list l)])
     (draw-one sc img e)))
+(define LAST (current-inexact-milliseconds))
 (define (draw-screen b)
-  (let* ([sc (empty-scene WIDTH HEIGHT)]
+  (let* ([sc BACKGROUND]
          [sc (draw-one sc PLAYER (st-player b))]
          [sc (draw-some sc PBULLET (st-pbullets b))]
          [sc (draw-some sc INVADER (st-invaders b))]
          [sc (draw-some sc IBULLET (st-ibullets b))])
-    sc))
+    (define NOW (current-inexact-milliseconds))
+    (begin0 (draw-one sc (text
+                          (format "FPS: ~a" (real->decimal-string (/ 1000 (- NOW LAST))))
+                          ACTOR-SIZE "white")
+                      (posn (* 0.90 WIDTH) (* 0.95 HEIGHT)))
+      (set! LAST NOW))))
 
 (module+ main
   (big-bang initial-st
-            (on-tick move-invaders&bullets)
+            (on-tick move-invaders&bullets 1/60)
             (on-key handle-key)
             (on-draw draw-screen)))
